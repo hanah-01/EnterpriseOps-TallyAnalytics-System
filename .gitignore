@@ -1,0 +1,32 @@
+.env
+*.env
+
+*.db
+*.sqlite
+*.sqlite3
+tally.db
+
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# === IDE FILES ===
+.vscode/
+.idea/
+
+# === OS FILES ===
+# Windows
+Thumbs.db
+Desktop.ini
+# macOS
+.DS_Store
+# Linux
+*~
+
+debug_*.py
+test_*.py
+explore_*.py
+
+*.log

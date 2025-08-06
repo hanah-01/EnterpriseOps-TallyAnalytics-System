@@ -1,10 +1,20 @@
 import sqlite3
 import google.generativeai as genai
 from typing import Dict, List, Tuple
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class DatabaseSchema:
-    def __init__(self, db_path: str = r"C:\Users\manoj\tallydb.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: str = None):
+        if db_path is None:
+            # Get the path relative to the project root
+            current_dir = os.path.dirname(__file__)  # tools directory
+            project_root = os.path.join(current_dir, "..", "..")  # multiagents directory
+            self.db_path = os.path.join(project_root, "tally.db")
+        else:
+            self.db_path = db_path
         self.tables: Dict[str, List[Tuple[str, str]]] = {}
         self._load_schema()
 
@@ -28,7 +38,15 @@ class DatabaseSchema:
                 return col_type
         return ""
 
-def get_sqlite_schema(db_path: str = r"C:\Users\manoj\tallydb.db") -> str:
+def get_default_db_path():
+    """Get the default database path relative to project root"""
+    current_dir = os.path.dirname(__file__)  # tools directory
+    project_root = os.path.join(current_dir, "..", "..")  # multiagents directory
+    return os.path.join(project_root, "tally.db")
+
+def get_sqlite_schema(db_path: str = None) -> str:
+    if db_path is None:
+        db_path = get_default_db_path()
     schema = DatabaseSchema(db_path)
     schema_str = []
     for table, columns in schema.tables.items():
@@ -38,21 +56,36 @@ def get_sqlite_schema(db_path: str = r"C:\Users\manoj\tallydb.db") -> str:
         schema_str.append("")
     return '\n'.join(schema_str)
 
-def validate_query(sql: str, db_path: str = r"C:\Users\manoj\tallydb.db") -> str:
+def validate_query(sql: str, db_path: str = None) -> str:
     """
     Validate if a SQL query is syntactically correct and return detailed error information.
     """
-    import sqlite3  # Use direct sqlite3 for validation, avoid importing run_query
+    if db_path is None:
+        db_path = get_default_db_path()
+    
     try:
-        print(f"[validate_query] Attempting to validate query: {sql}")
+        print(f"[validate_query] Query repr: {repr(sql)}")
+        print(f"[validate_query] Query length: {len(sql)}")
+        print(f"[validate_query] Contains semicolon: {';' in sql}")
+        
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         query = sql.strip()
+        
+        # Remove any trailing semicolon
+        if query.endswith(';'):
+            query = query[:-1]
+            
         if not query.lower().startswith('select'):
             return "Error: Only SELECT queries are supported"
+            
+        # Execute the query with a limit to test it
         if "limit" not in query.lower():
-            query = f"{query} LIMIT 1"
-        cursor.execute(query)
+            test_query = f"{query} LIMIT 1"
+        else:
+            test_query = query
+            
+        cursor.execute(test_query)
         results = cursor.fetchall()
         print(f"[validate_query] Query executed successfully, got {len(results)} results")
         conn.close()
@@ -96,6 +129,8 @@ def suggest_query(intent: str, agent: str = None, api_key: str = None) -> str:
     try:
         response = model.generate_content(prompt)
         sql = response.text.strip()
+        
+        # Clean up the SQL query
         if sql.startswith('```'):
             lines = sql.split('\n')
             sql = '\n'.join([line for line in lines if not line.startswith('```')])
@@ -104,9 +139,14 @@ def suggest_query(intent: str, agent: str = None, api_key: str = None) -> str:
             sql = sql[1:].strip()
             if sql.endswith('`'):
                 sql = sql[:-1].strip()
-        sql = '\n'.join(line for line in sql.split('\n') if line.strip())
+        
+        # Remove empty lines and join into a single statement
+        sql_lines = [line.strip() for line in sql.split('\n') if line.strip()]
+        sql = ' '.join(sql_lines)
+        
         if not sql or sql.lower().startswith('error'):
             return "Error: No valid query generated"
+            
         print(f"[suggest_query] Cleaned SQL query: {sql}")
         validation_result = validate_query(sql)
         if validation_result != "valid":
@@ -144,7 +184,9 @@ def delete_query(table_name, conditions):
     query = f"DELETE FROM {table_name} WHERE {' AND '.join(conditions)}"
     return query
 
-def get_table_names(db_path: str = r"C:\Users\manoj\tallydb.db"):
+def get_table_names(db_path: str = None):
+    if db_path is None:
+        db_path = get_default_db_path()
     query = "SELECT name FROM sqlite_master WHERE type='table';"
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -154,7 +196,9 @@ def get_table_names(db_path: str = r"C:\Users\manoj\tallydb.db"):
     conn.close()
     return [row[0] for row in rows]
 
-def get_columns(table_name, db_path: str = r"C:\Users\manoj\tallydb.db"):
+def get_columns(table_name, db_path: str = None):
+    if db_path is None:
+        db_path = get_default_db_path()
     query = f"PRAGMA table_info({table_name});"
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -163,3 +207,62 @@ def get_columns(table_name, db_path: str = r"C:\Users\manoj\tallydb.db"):
     cursor.close()
     conn.close()
     return [row[1] for row in rows]
+
+def get_sqlite_schema():
+    """Return schema information based on actual database structure"""
+    return """
+    ACTUAL TALLY DATABASE SCHEMA:
+    
+    Key Tables and Columns:
+    
+    trn_accounting (Accounting Entries):
+    - guid (TEXT) - Transaction ID
+    - ledger (TEXT) - Account/Ledger name  
+    - amount (FLOAT) - Transaction amount
+    - amount_forex (FLOAT) - Foreign amount
+    - currency (TEXT) - Currency symbol
+    
+    trn_voucher (Voucher Headers):
+    - guid (TEXT) - Voucher ID
+    - date (DATE) - Transaction date (YYYY-MM-DD format)
+    - voucher_type (TEXT) - Type like 'GST Sales'
+    - voucher_number (TEXT) - Document number
+    - party_name (TEXT) - Customer/Supplier name
+    - place_of_supply (TEXT) - Location
+    
+    mst_ledger (Chart of Accounts):
+    - guid (TEXT) - Ledger ID
+    - name (TEXT) - Account name
+    - parent (TEXT) - Account group (Cash-in-hand, Bank Accounts, etc.)
+    - opening_balance (FLOAT) - Opening balance
+    - is_revenue (BIGINT) - Revenue account flag
+    
+    trn_bank (Bank Transactions):
+    - guid (TEXT) - Transaction ID
+    - ledger (TEXT) - Bank account name
+    - transaction_type (TEXT) - Type like 'Cheque/DD'
+    - instrument_date (DATE) - Transaction date
+    - amount (FLOAT) - Amount
+    
+    trn_inventory (Inventory Transactions):
+    - guid (TEXT) - Transaction ID
+    - item (TEXT) - Product name
+    - quantity (FLOAT) - Quantity (negative = outward/sales)
+    - rate (FLOAT) - Unit rate
+    - amount (FLOAT) - Total value
+    - additional_amount (FLOAT) - Extra charges
+    - discount_amount (FLOAT) - Discount amount
+    - godown (TEXT) - Warehouse/location name
+    - tracking_number (TEXT) - Tracking reference
+    - order_number (TEXT) - Order reference
+    - order_duedate (TEXT) - Due date
+    
+    Common GST Ledger Names:
+    - 'Output CGST @ 09%'
+    - 'Output SGST @ 09%' 
+    - 'Output IGST @ 18%'
+    - 'GST Sales @ 18%'
+    
+    Date Format: All dates are in 'YYYY-MM-DD' format
+    Join Pattern: Use guid to join trn_accounting with trn_voucher
+    """
